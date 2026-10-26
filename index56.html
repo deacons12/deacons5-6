@@ -87,7 +87,7 @@
 <div class="content">
 <section class="page active" id="page-home">
 <div class="stats">
-<div class="stat"><div><div class="label">إجمالي الطلاب</div><div class="num" id="statStudents">1</div></div><div class="bubble">👥</div></div>
+<div class="stat"><div><div class="label">إجمالي الطلاب</div><div class="num" id="statStudents">82</div></div><div class="bubble">👥</div></div>
 <div class="stat"><div><div class="label">الحاضرون في آخر تسجيل</div><div class="num" id="statPresent">—</div></div><div class="bubble" style="background:#e3f8ef;color:#19a779">✓</div></div>
 <div class="stat"><div><div class="label">الغائبون في آخر تسجيل</div><div class="num" id="statAbsent">—</div></div><div class="bubble" style="background:#ffe8ed;color:#e94d68">✕</div></div>
 <div class="stat"><div><div class="label">متوسط الدرجات المسجلة</div><div class="num" id="statAverage">—</div></div><div class="bubble" style="background:#fff2d9;color:#d68b00">★</div></div>
@@ -147,7 +147,7 @@
 <section class="page" id="page-reports">
 <div class="card"><div class="cardhead"><h2>التقارير والإحصائيات</h2><div class="toolbar"><button class="primary" onclick="printFullReport()">🖨️ طباعة التقرير الشامل</button><button class="secondary" onclick="exportCSV('students')">تنزيل قائمة الطلاب CSV</button></div></div>
 <div class="reportgrid">
-<div class="reportbox">إجمالي الطلاب<b id="rStudents">1</b></div>
+<div class="reportbox">إجمالي الطلاب<b id="rStudents">82</b></div>
 <div class="reportbox">إجمالي سجلات الدرجات<b id="rGrades">0</b></div>
 <div class="reportbox">إجمالي سجلات الحضور<b id="rAtt">0</b></div>
 <div class="reportbox">متوسط الدرجات العام<b id="rAvg">—</b></div>
@@ -175,8 +175,14 @@ const FIREBASE_DB_URL='https://deacons56-b795c-default-rtdb.europe-west1.firebas
 const PENDING_KEY=KEY+'_pendingSync';
 let remoteReady=false, remoteBusy=false, saveTimer=null, lastRemoteSnapshot='', pendingSync=localStorage.getItem(PENDING_KEY)==='1', retryDelay=2000;
 function setSyncStatus(message,color='#a96b00'){const el=document.getElementById('syncStatus');if(el){el.textContent=message;el.style.color=color}}
-const initial=()=>({students:[{id:1,name:'يوسف',notes:''}],subjects:['رياضيات','لغة عربية','لغة إنجليزية','حاسب آلي'],grades:[],attendance:[],nextStudentId:2});
+const initial=()=>({students:[{id:1,name:'يوسف',notes:''}],subjects:[],grades:[],attendance:[],nextStudentId:2,cleanupVersion:1});
 let db=load();
+const CLEANUP_KEY=KEY+'_cleanup_v1';
+if(localStorage.getItem(CLEANUP_KEY)!=='1'){
+  db=initial();
+  try{localStorage.setItem(KEY,JSON.stringify(db));localStorage.setItem(PENDING_KEY,'1');localStorage.setItem(CLEANUP_KEY,'1')}catch(e){}
+  pendingSync=true;
+}
 function load(){try{const x=JSON.parse(localStorage.getItem(KEY));if(x&&Array.isArray(x.students))return x}catch(e){}return initial()}
 function save(){
   const payload=JSON.stringify(db);
@@ -205,16 +211,11 @@ async function connectFirebase(){
     try{response=await fetch(FIREBASE_DB_URL+'/deacons56_weekly_tracker.json',{signal:controller.signal})}finally{clearTimeout(timeout)}
     if(!response.ok)throw new Error('قراءة البيانات: HTTP '+response.status);
     const remote=await response.json();
-    const migrationKey=KEY+'_youssef_only_migration_v1';
-    if(localStorage.getItem(migrationKey)!=='done'){
-      db={...initial(),subjects:remote&&Array.isArray(remote.subjects)?remote.subjects:initial().subjects,students:[{id:1,name:'يوسف',notes:''}],grades:[],attendance:[],nextStudentId:2};
-      localStorage.setItem(KEY,JSON.stringify(db));
-      pendingSync=true;
-      localStorage.setItem(PENDING_KEY,'1');
-      localStorage.setItem(migrationKey,'done');
-    }
     if(remote&&Array.isArray(remote.students)){
-      if(pendingSync){
+      if(Number(remote.cleanupVersion)===1){
+        db={...initial(),...remote,students:remote.students,subjects:Array.isArray(remote.subjects)?remote.subjects:[],grades:Array.isArray(remote.grades)?remote.grades:[],attendance:Array.isArray(remote.attendance)?remote.attendance:[]};
+        localStorage.setItem(KEY,JSON.stringify(db));localStorage.setItem(CLEANUP_KEY,'1');lastRemoteSnapshot=JSON.stringify(remote);pendingSync=false;localStorage.removeItem(PENDING_KEY);renderAll();
+      }else if(pendingSync){
         // Local changes not yet confirmed are kept and uploaded instead of being overwritten by remote data.
         db=load();
       }else{
